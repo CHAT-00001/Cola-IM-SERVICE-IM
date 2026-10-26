@@ -1,0 +1,6 @@
+Hello, world!
+[2m2026-10-25T19:06:48.708763Z[0m [32m INFO[0m [2mcola_im_chat_server::app[0m[2m:[0m 🟢 - 正在启动 COLA IM Server ..
+[2m2026-10-25T19:06:48.711237Z[0m [32m INFO[0m [2mcola_im_chat_server::app[0m[2m:[0m 正在加载应用配置
+[2m2026-10-25T19:06:48.737567Z[0m [32m INFO[0m [2mcola_im_chat_server::app[0m[2m:[0m 应用配置加载完成
+[2m2026-10-25T19:06:48.739139Z[0m [32m INFO[0m [2mcola_im_chat_server::app[0m[2m:[0m 正在连接 PostgreSQL [3mhost[0m[2m=[0m127.0.0.1 [3mport[0m[2m=[0m5432 [3mdatabase[0m[2m=[0mim_2024
+[2m2026-10-25T19:07:18.764024Z[0m [31mERROR[0m [2mapp_config::db::pg[0m[2m:[0m 🛢️ [PG] Failed to connect PostgresSQL 127.0.0.1:5432 (database: im_2024): PoolTimedOut

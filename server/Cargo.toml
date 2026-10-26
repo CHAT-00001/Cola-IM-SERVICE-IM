@@ -1,0 +1,46 @@
+## server/Cargo.toml
+## 2026-10-07 20:00
+
+########
+
+[package]
+name = "cola-im-chat-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+## 内部依赖
+app_config = { path = "../crates/app_config" }
+app_core = { path = "../crates/app_core" }
+storage_pg = { path = "../crates/storage_pg" }
+
+## 外部依赖
+actix-web = "4.13.0"
+chrono = { version = "0.4.1", features = ["serde"] }
+config = "0.15"
+dashmap = "6.1"
+dotenvy = "0.15" # 加载本地 .env 中的环境变量（如 COLA_JWT_SECRET）
+jsonwebtoken = { version = "10.2", features = ["rust_crypto"] } # 使用纯 Rust 加密后端
+md5 = "0.7"
+mongodb = "3.9.1"
+futures-util = "0.3"
+redis = { version = "1.0.2", features = ["tokio-comp"] } # 异步 Redis
+reqwest = { version = "0.12", features = ["json", "native-tls"] } # 使用系统 TLS
+serde = { version = "1.0", features = ["derive"] }
+serde_repr = "0.1"
+serde_json = "1.0"
+serde_urlencoded = "0.7"
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+toml = "0.8.23"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+log = "0.4.29"
+text = "0.0.4"
+actix = "0.13.5"
+actix-web-actors = "4.3.1+deprecated"
+async-trait = "0.1.89"
+thiserror = "2"
+

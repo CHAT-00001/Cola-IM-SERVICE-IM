@@ -1,0 +1,4 @@
+
+thread 'main' (10052) panicked at server\src\app.rs:60:6:
+无法连接到 PostgreSQL: PoolTimedOut
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

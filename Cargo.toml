@@ -1,0 +1,39 @@
+#### cargo.toml  -- ROOT
+## 2026-01-01 12:04:10
+
+#[[bin]]
+
+
+## 全工作区模式
+[workspace]
+resolver = "2"
+members = [
+    "crates/app_config",
+    "crates/app_core",
+    #"crates/transport_http",
+    #"crates/transport_ws",
+    "crates/storage_pg", # 确保路径匹配
+    "server", # 拼接全家桶
+]
+## 默认create
+default-members = ["server"]
+
+
+## 工作区共享依赖
+[workspace.dependencies]
+
+
+[profile.dev]
+# 开发配置：追求极致的编译速度
+opt-level = 0          # 最低优化，编译最快
+incremental = true     # 开启增量编译，必备！
+codegen-units = 256    # 拆分更多的编译单元以实现并行编译，最大化加速
+debug = 1              # 只生成行号信息，够调试也够快
+
+[profile.release]
+# 发布配置：平衡编译时间与运行性能
+opt-level = 3          # 最高级别优化
+lto = "thin"           # 使用"瘦"链接时优化，比"fat"快，效果也不错
+codegen-units = 16     # 在并行编译和优化效果间取得平衡
+debug = 1              # 保留行号，便于线上排查问题
+panic = "unwind"       # 恐慌

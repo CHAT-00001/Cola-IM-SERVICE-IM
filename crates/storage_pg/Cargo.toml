@@ -1,0 +1,19 @@
+# crates/storage_pg/Cargo.toml -- storage_pg crate manifest
+# 2026/3/24 04:07 Created.
+
+[package]
+name = "storage_pg"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+## 内部依赖
+app_core = { path = "../app_core" }
+
+## 外部依赖
+sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio-native-tls", "macros", "chrono","uuid","json"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1.89"
+uuid = { version = "1.22.0", features = ["v4"] }
+serde_json = "1.0.148"
+tracing = "0.1"

@@ -1,0 +1,27 @@
+# .gitignore -- Git ignore rules for local secrets and build output
+# 2026/1/5 02:47 Created.
+
+/target
+
+# 本地环境变量文件（含 COLA_JWT_SECRET 等密钥，禁止提交）
+.env
+.env.*
+!.env.example
+
+# 本地服务配置（含数据库/MongoDB/API 等明文凭据，禁止提交）
+# 如需共享结构，请提交不含真实秘密的模板，例如 application.example.toml
+application.toml
+application.*.toml
+!application.example.toml
+
+# IDE 数据源配置（可能保存数据库连接与凭据）
+.idea/dataSources.local.xml
+
+# TLS 证书与私钥（WebTransport 的 cert_file / key_file 使用）
+*.pem
+*.key
+*.p12
+*.pfx
+
+# 各 crate 的本地构建产物（如 crates/storage_pg/target/）
+**/target/
