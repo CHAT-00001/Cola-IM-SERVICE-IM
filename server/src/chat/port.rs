@@ -3,8 +3,10 @@
 
 pub use app_core::ports::message::{ContactRelationshipRepository, GroupMembershipRepository};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 
 use crate::chat::model::{AckStage, PendingDelivery, PersistMessage, SenderEndpoint};
+use crate::models::message::MessageBody;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ChatError {
@@ -41,6 +43,16 @@ pub trait MessageStore: Send + Sync {
     ) -> Result<Vec<PendingDelivery>, ChatError>;
 
     async fn sender_endpoint(&self, message_id: &str) -> Result<SenderEndpoint, ChatError>;
+
+    /// # [PORT] - conversation_history
+    /// * `DESC`: `按会话时间线倒序取最近 limit 条已落库消息；before 用于向上翻页`
+    /// * `RETURN`: `按 send_at 正序（旧 -> 新）排列的消息体，便于客户端直接渲染`
+    async fn conversation_history(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<DateTime<Utc>>,
+    ) -> Result<Vec<MessageBody>, ChatError>;
 }
 
 #[async_trait]

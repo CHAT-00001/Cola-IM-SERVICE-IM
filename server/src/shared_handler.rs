@@ -1,15 +1,18 @@
 // server/src/shared_handler.rs -- Shared transport-independent chat handler
 // 2026/10/7 14:03 Created.
 
+////////
+
 use chrono::Utc;
 use std::sync::Arc;
 use tracing::{info, warn};
-
 use crate::chat::model::{AckStage, AuthenticatedSession, MessageAcknowledgement, PendingDelivery};
 use crate::chat::port::DeviceConnectionRegistry;
 use crate::chat::service::{AcknowledgementService, DirectMessageService, GroupMessageService};
 use crate::hub::ChatHub;
 use crate::models::message::{Event, MessageBody, MsgChannel, MsgType, Payload, Status};
+
+////////
 
 type DirectService = DirectMessageService<
     crate::service::mongodb::MessageStoreBackend,
@@ -30,6 +33,9 @@ type GroupService = GroupMessageService<
 
 type AckService = AcknowledgementService<crate::service::mongodb::MessageStoreBackend>;
 
+////////
+
+/// # [HANDLER] - 聊天方式
 #[derive(Clone)]
 pub struct ChatHandler {
     hub: ChatHub,
@@ -39,7 +45,10 @@ pub struct ChatHandler {
     acknowledgements: Option<Arc<AckService>>,
 }
 
+// 构造实现
 impl ChatHandler {
+    ////////
+    
     /// # [HANDLER] - new
     /// * `DESC`: `閸掓稑缂撻崗鍙橀煩閼卞﹤銇?Handler 楠炶埖鏁為崗銉ょ炊鏉堟挻妫ら崗瀹犵箾閹恒儲鏁為崘宀冦€僠
     pub fn new(hub: ChatHub, max_rooms_per_connection: usize) -> Self {
@@ -51,6 +60,8 @@ impl ChatHandler {
             acknowledgements: None,
         }
     }
+
+    ////////
 
     /// # [HANDLER] - with_chat_services
     /// * `DESC`: `濞夈劌鍙?MongoDB 濞戝牊浼呮禒鎾冲亶閸?PostgreSQL 閸忓磭閮存禒鎾冲亶娴犮儱鎯庨悽銊ュ礋閼卞﹦鍏㈤懕濂?
@@ -65,6 +76,8 @@ impl ChatHandler {
         self.acknowledgements = Some(Arc::new(acknowledgements));
         self
     }
+
+    ////////
 
     /// # [HANDLER] - handle_authenticated_message
     /// * `DESC`: `娴ｈ法鏁ょ拋銈堢槈娴兼俺鐦界捄顖滄暠閸楁洝浜扮紘銈堜喊楠炶泛婀禍瀣閹存劕濮涢崥搴ょ箲閸ョ偞婀囬崝锛勵伂 ACK`
@@ -112,6 +125,8 @@ impl ChatHandler {
         Ok(acknowledgement)
     }
 
+    ////////
+
     /// # [HANDLER] - send_authenticated_message
     /// * `DESC`: `传输无关的已认证消息入口，直接返回确认而不回推长连接`
     pub async fn send_authenticated_message(
@@ -121,6 +136,8 @@ impl ChatHandler {
     ) -> Result<MessageAcknowledgement, crate::chat::port::ChatError> {
         self.dispatch_authenticated(session, message).await
     }
+
+    ////////
 
     /// # [HANDLER] - dispatch_authenticated
     /// * `DESC`: `按 channel 将已认证消息分发到单聊、群聊或设备确认服务`
@@ -185,6 +202,8 @@ impl ChatHandler {
         }
     }
 
+    ////////
+
     /// # [HANDLER] - pending_messages_for_device
     /// * `DESC`: `返回指定设备尚未确认的离线消息，供 REST 同步使用`
     pub async fn pending_messages_for_device(
@@ -199,6 +218,49 @@ impl ChatHandler {
         })?;
         service.pending_for_device(session, limit).await
     }
+
+    ////////
+
+    /// # [HANDLER] - conversation_history
+    /// * `DESC`: `校验当前账号是该会话成员后，按时间线返回最近的消息（旧 -> 新）`
+    /// * `NOTE`: `客户端重开会话时用它补历史；离线补投仍走 pending_messages_for_device`
+    pub async fn conversation_history(
+        &self,
+        session: &AuthenticatedSession,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<chrono::DateTime<Utc>>,
+    ) -> Result<Vec<MessageBody>, crate::chat::port::ChatError> {
+        let conversation_id = conversation_id.trim();
+        if conversation_id.is_empty() {
+            return Err(crate::chat::port::ChatError::InvalidMessage(
+                "room_id is required".to_owned(),
+            ));
+        }
+        let service = self.direct.as_ref().ok_or_else(|| {
+            crate::chat::port::ChatError::Persistence(
+                "direct-message service is not configured".to_owned(),
+            )
+        })?;
+        // 单聊会话能用成员关系反查就顺带校验；群聊/非 UUID 会话反查不到（返回 None），
+        // 此时退化为按 conversation_id 过滤读取——该 ID 本身即会话可见范围。
+        if service
+            .resolve_session_peer(conversation_id, session.account_id)
+            .await?
+            .is_some()
+        {
+            tracing::debug!(
+                account_id = session.account_id,
+                room_id = conversation_id,
+                "[💬 MSG] 会话成员校验通过，读取历史"
+            );
+        }
+        service
+            .conversation_history(conversation_id, limit, before)
+            .await
+    }
+
+    ////////
 
     /// # [HANDLER] - acknowledge
     /// * `DESC`: `閹镐椒绠欓崠鏍ㄥ瘹鐎规俺澶勯崣鐤啎婢?ACK 楠炶泛娲栨导鐘虫箛閸旓紕顏涵顔款吇`
@@ -215,6 +277,8 @@ impl ChatHandler {
         })?;
         service.acknowledge_device(session, message_id, stage).await
     }
+
+    ////////
 
     /// # [HANDLER] - sync_pending_for_device
     /// * `DESC`: `鐠併倛鐦夐崥搴濈矤 MongoDB 閺€鏈垫缁犲崬鎷伴崣鎴滄缁犺精藟閹峰顕氱拋鎯ь槵閺堫亞鈥樼拋銈嗙Х閹棎
@@ -253,6 +317,8 @@ impl ChatHandler {
         Ok(enqueued)
     }
 
+    ////////
+
     /// # [HANDLER] - acknowledgement_recipient
     /// * `DESC`: `閼惧嘲褰囧☉鍫熶紖閸樼喎褰傞柅浣藉閸欏嘲鎷扮拋鎯ь槵閻劋绨捄顖滄暠鐠佹儳顦?ACK`
     async fn acknowledgement_recipient(
@@ -270,6 +336,8 @@ impl ChatHandler {
             .await
     }
 
+    ////////
+
     /// # [HANDLER] - handle_message
     /// * `DESC`: `鎸?channel 鍒嗗彂鍏叡銆佹湭璁よ瘉浼氳瘽銆丄CK 鍜岄€氱煡娑堟伅`
     pub fn handle_message(&self, connection_id: &str, mut message: MessageBody) {
@@ -286,6 +354,8 @@ impl ChatHandler {
             }
         }
     }
+
+    ////////
 
     /// # [HANDLER] - handle_public
     /// * `DESC`: `鐏忓棗鍙曢崗杈ㄧХ閹垵绻涢幒銉ュ煂閹村潡妫块獮鍫曗偓姘崇箖閸忓彉闊╂潻鐐村复濞夈劌鍞界悰銊ョ畭閹剧挜
@@ -313,6 +383,8 @@ impl ChatHandler {
         );
     }
 
+    ////////
+
     /// # [HANDLER] - handle_unauthenticated_direct_or_group
     /// * `DESC`: `鎷掔粷鏈璇佽繛鎺ユ墽琛岄渶瑕佽韩浠界殑鍗曡亰銆佺兢鑱婃垨 ACK 鎿嶄綔`
     pub fn handle_unauthenticated_direct_or_group(&self, channel: MsgChannel) {
@@ -322,11 +394,15 @@ impl ChatHandler {
         );
     }
 
+    ////////
+
     /// # [HANDLER] - hub
     /// * `DESC`: `鏉╂柨娲栭崗鍙橀煩 Handler 娴ｈ法鏁ら惃鍕箾閹恒儲鏁為崘宀冦€冮崣銉︾労`
     pub fn hub(&self) -> &ChatHub {
         &self.hub
     }
+
+    ////////
 
     /// # [HANDLER] - max_rooms_per_connection
     /// * `DESC`: `鏉╂柨娲栭崡鏇氶嚋鏉╃偞甯撮崗浣筋啅閸旂姴鍙嗛惃鍕付婢堆勫煣闂傚瓨鏆焋
@@ -334,6 +410,8 @@ impl ChatHandler {
         self.max_rooms_per_connection
     }
 }
+
+////////
 
 /// # [HANDLER] - protocol_error_message
 /// * `DESC`: `鐏忓棗鍑＄拋銈堢槈濞戝牊浼呮径鍕倞闁挎瑨顕ゆ潪顒佸床娑撹櫣绮烘稉鈧崡蹇氼唴闁挎瑨顕ら崶鐐差槻`
@@ -494,3 +572,5 @@ mod tests {
         }
     }
 }
+
+//////// END

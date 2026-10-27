@@ -12,6 +12,7 @@ use crate::chat::model::{
     AckStage, ConversationKind, PendingDelivery, PersistMessage, SenderEndpoint,
 };
 use crate::chat::port::{ChatError, MessageStore};
+use crate::models::message::MessageBody;
 
 ////////
 
@@ -162,6 +163,30 @@ impl MessageStore for MessageStoreBackend {
             Self::Unavailable(store) => store.sender_endpoint(message_id).await,
         }
     }
+
+    ////////
+
+    /// # [HANDLER] - conversation_history
+    /// * `DESC`: `按后端状态分派会话历史查询`
+    async fn conversation_history(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<MessageBody>, ChatError> {
+        match self {
+            Self::Available(store) => {
+                store
+                    .conversation_history(conversation_id, limit, before)
+                    .await
+            }
+            Self::Unavailable(store) => {
+                store
+                    .conversation_history(conversation_id, limit, before)
+                    .await
+            }
+        }
+    }
 }
 
 
@@ -232,6 +257,20 @@ impl MessageStore for UnavailableMessageStore {
     /// * `DESC`: `降级状态下拒绝发送者查询`
     async fn sender_endpoint(&self, _message_id: &str) -> Result<SenderEndpoint, ChatError> {
         Err(self.error())
+    }
+
+    ////////
+
+    /// # [HANDLER] - conversation_history
+    /// * `DESC`: `降级状态下没有可读历史，返回空列表而不是 5xx，避免客户端整块失败`
+    async fn conversation_history(
+        &self,
+        _conversation_id: &str,
+        _limit: u32,
+        _before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<MessageBody>, ChatError> {
+        error!(reason = %self.reason, "[🤐 MG REPO] - ⚠️ 会话历史不可用：MongoDB 未连接");
+        Ok(Vec::new())
     }
 }
 
@@ -915,6 +954,53 @@ impl MessageStore for MongoMessageStore {
             account_id,
             device_id,
         })
+    }
+
+    ////////
+
+    /// # [HANDLER] - conversation_history
+    /// * `DESC`: `按 conversation_id 从主消息集合倒序读取最近 limit 条，再反转成时间正序返回`
+    /// * `NOTE`: `before 为上一页最早一条的 send_at，用于向上翻页；索引 (conversation_id, created_at, message_id) 已建`
+    async fn conversation_history(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<Vec<MessageBody>, ChatError> {
+        if conversation_id.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut filter = doc! { "conversation_id": conversation_id };
+        if let Some(before) = before {
+            filter.insert(
+                "created_at",
+                doc! { "$lt": BsonDateTime::from_millis(before.timestamp_millis()) },
+            );
+        }
+
+        let cursor = self
+            .main
+            .find(filter)
+            .sort(doc! { "created_at": -1, "message_id": -1 })
+            .limit(i64::from(limit.clamp(1, 200)))
+            .await
+            .map_err(persistence_error)?;
+
+        use futures_util::TryStreamExt;
+        let documents: Vec<Document> = cursor.try_collect().await.map_err(persistence_error)?;
+        let mut messages = Vec::with_capacity(documents.len());
+        for document in documents {
+            let Some(body) = document.get("body").cloned() else {
+                continue;
+            };
+            let message: MessageBody = from_bson(body).map_err(persistence_error)?;
+            messages.push(message);
+        }
+
+        // 数据库按时间倒序返回，聊天窗口需要旧 -> 新，因此整体反转。
+        messages.reverse();
+        Ok(messages)
     }
 }
 

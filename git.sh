@@ -15,6 +15,12 @@ git status
 git add src/ app/ api/ cola_*/ gateway/ health/ im/ kits/ network/ repo/ migrations/ assets/
 # 注意：target/、build_output*.txt 等已被 .gitignore 忽略
 
+# 1. 添加远程 origin
+git remote add origin https://github.com/CHAT-00001/Cola-IM-SERVICE-IM.git
+
+# 2. 本地 master → 远程 main，同时绑定上游
+git push -u origin master:main
+
 # 修改.gitignore删掉旧屏蔽规则
 # 清除仓库缓存重新扫描：
 # bash

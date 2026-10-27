@@ -30,11 +30,22 @@ struct ErrorResponse {
 pub struct MessageSyncQuery {
     #[serde(default)]
     pub limit: Option<u32>,
+    /// 会话 ID：存在时按时间线返回该会话历史，缺省时仍返回未确认的离线消息。
+    #[serde(default)]
+    pub room_id: Option<String>,
+    /// 历史翻页游标：上一页最早一条消息的 `send_at`（RFC3339）。
+    #[serde(default)]
+    pub before: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct MessageSyncResponse {
     messages: Vec<PendingDelivery>,
+}
+
+#[derive(Debug, Serialize)]
+struct MessageHistoryResponse {
+    messages: Vec<MessageBody>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +77,41 @@ pub async fn sync_offline_messages(
         Err(response) => return response,
     };
     let limit = query.limit.unwrap_or(50);
+
+    // room_id 存在时按会话时间线取历史（重开会话/刷新页面补消息）；
+    // 缺省时保持原有语义：返回该设备尚未确认的离线消息。
+    if let Some(room_id) = query
+        .room_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let before = match query.before.as_deref().map(str::trim) {
+            Some(raw) if !raw.is_empty() => match chrono::DateTime::parse_from_rfc3339(raw) {
+                Ok(value) => Some(value.with_timezone(&Utc)),
+                Err(_) => {
+                    return HttpResponse::BadRequest().json(ErrorResponse {
+                        error: "invalid_request",
+                        message: "before must be an RFC3339 timestamp".to_owned(),
+                    });
+                }
+            },
+            _ => None,
+        };
+        return match handler
+            .conversation_history(&session, room_id, limit, before)
+            .await
+        {
+            Ok(messages) => HttpResponse::Ok().json(MessageHistoryResponse { messages }),
+            Err(ChatError::Unauthorized) => {
+                HttpResponse::Forbidden().json(ErrorResponse {
+                    error: "forbidden",
+                    message: "conversation is not accessible".to_owned(),
+                })
+            }
+            Err(error) => error_response(error, "could not load conversation history"),
+        };
+    }
 
     match handler.pending_messages_for_device(&session, limit).await {
         Ok(messages) => HttpResponse::Ok().json(MessageSyncResponse { messages }),

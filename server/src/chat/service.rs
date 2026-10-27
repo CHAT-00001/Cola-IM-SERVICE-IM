@@ -167,6 +167,19 @@ where
             .await
             .map_err(|error| ChatError::Persistence(format!("session repository: {error}")))
     }
+
+    /// # [HANDLER] - conversation_history
+    /// * `DESC`: `读取会话时间线历史；成员身份由调用方（ChatHandler）先行校验`
+    pub async fn conversation_history(
+        &self,
+        conversation_id: &str,
+        limit: u32,
+        before: Option<chrono::DateTime<Utc>>,
+    ) -> Result<Vec<MessageBody>, ChatError> {
+        self.store
+            .conversation_history(conversation_id, limit, before)
+            .await
+    }
 }
 
 ////////
@@ -467,6 +480,15 @@ mod tests {
 
         async fn sender_endpoint(&self, _message_id: &str) -> Result<SenderEndpoint, ChatError> {
             Err(ChatError::MessageNotFound)
+        }
+
+        async fn conversation_history(
+            &self,
+            _conversation_id: &str,
+            _limit: u32,
+            _before: Option<chrono::DateTime<Utc>>,
+        ) -> Result<Vec<MessageBody>, ChatError> {
+            Ok(Vec::new())
         }
     }
 
