@@ -4,7 +4,7 @@
 ########
 
 [package]
-name = "cola-im-chat-server"
+name = "cola-im-server"
 version = "0.1.0"
 edition = "2021"
 
@@ -43,4 +43,15 @@ actix = "0.13.5"
 actix-web-actors = "4.3.1+deprecated"
 async-trait = "0.1.89"
 thiserror = "2"
+## WebTransport（基于 quinn 的 HTTP/3 + WebTransport 栈）
+quinn = "0.11.12"
+h3 = "0.0.8"
+h3-quinn = { version = "0.0.10", features = ["datagram"] }
+h3-webtransport = "0.1.2"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] } # 仅 ring，与 quinn 的 provider 保持一致
+rustls-pki-types = { version = "1", features = ["std"] } # 读取 PEM 证书与私钥
+bytes = "1"
+http = "1"
+## protobuf 编解码（纯 Rust derive，不依赖 protoc）
+prost = "0.14"
 

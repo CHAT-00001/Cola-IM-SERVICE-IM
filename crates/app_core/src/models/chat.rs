@@ -1,5 +1,5 @@
 // app_core/src/models/chat.rs  -- 聊天列表模型
-// 2026-10-11 16:20
+// 2026/10/11 16:20
 
 ////////
 
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 ////////
 
-/// # 聊天列表结构体
+/// # [MODEL] - 聊天列表结构体
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct ChatListItem {
     pub chat_id: i64,                      // 聊天ID

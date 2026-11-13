@@ -3,14 +3,14 @@
 
 ////////
 
-use chrono::Utc;
-use std::sync::Arc;
-use tracing::{info, warn};
 use crate::chat::model::{AckStage, AuthenticatedSession, MessageAcknowledgement, PendingDelivery};
 use crate::chat::port::DeviceConnectionRegistry;
 use crate::chat::service::{AcknowledgementService, DirectMessageService, GroupMessageService};
 use crate::hub::ChatHub;
 use crate::models::message::{Event, MessageBody, MsgChannel, MsgType, Payload, Status};
+use chrono::Utc;
+use std::sync::Arc;
+use tracing::{info, warn};
 
 ////////
 
@@ -48,7 +48,7 @@ pub struct ChatHandler {
 // 构造实现
 impl ChatHandler {
     ////////
-    
+
     /// # [HANDLER] - new
     /// * `DESC`: `閸掓稑缂撻崗鍙橀煩閼卞﹤銇?Handler 楠炶埖鏁為崗銉ょ炊鏉堟挻妫ら崗瀹犵箾閹恒儲鏁為崘宀冦€僠
     pub fn new(hub: ChatHub, max_rooms_per_connection: usize) -> Self {
@@ -196,8 +196,7 @@ impl ChatHandler {
                 self.acknowledge(session, &message_id, stage).await
             }
             _ => Err(crate::chat::port::ChatError::InvalidMessage(
-                "authenticated message entry supports only single, group and ACK events"
-                    .to_owned(),
+                "authenticated message entry supports only single, group and ACK events".to_owned(),
             )),
         }
     }
@@ -242,19 +241,29 @@ impl ChatHandler {
                 "direct-message service is not configured".to_owned(),
             )
         })?;
-        // 单聊会话能用成员关系反查就顺带校验；群聊/非 UUID 会话反查不到（返回 None），
-        // 此时退化为按 conversation_id 过滤读取——该 ID 本身即会话可见范围。
-        if service
-            .resolve_session_peer(conversation_id, session.account_id)
-            .await?
-            .is_some()
-        {
-            tracing::debug!(
-                account_id = session.account_id,
-                room_id = conversation_id,
-                "[💬 MSG] 会话成员校验通过，读取历史"
-            );
+        let direct_member = service
+            .is_session_member(conversation_id, session.account_id)
+            .await?;
+        let group_member = self
+            .group
+            .as_ref()
+            .ok_or_else(|| {
+                crate::chat::port::ChatError::Persistence(
+                    "group-message service is not configured".to_owned(),
+                )
+            })?
+            .is_member(conversation_id, session.account_id)
+            .await?;
+        if !direct_member && !group_member {
+            return Err(crate::chat::port::ChatError::Unauthorized);
         }
+        tracing::debug!(
+            account_id = session.account_id,
+            room_id = conversation_id,
+            direct_member,
+            group_member,
+            "[💬 MSG] 会话成员校验通过，读取历史"
+        );
         service
             .conversation_history(conversation_id, limit, before)
             .await
@@ -410,6 +419,26 @@ impl ChatHandler {
         self.max_rooms_per_connection
     }
 }
+impl ChatHandler {
+    /// # [HANDLER] - handle_inbound_frame
+    /// * `DESC`: `传输无关的上行帧入口：先 E2EE 解密，再按 codec 解码，最后进入已认证消息处理。
+    ///   WS 与 WT 适配器共用此方法，仅在字节来源上区分。`
+    pub async fn handle_inbound_frame(
+        &self,
+        session: &AuthenticatedSession,
+        codec: &dyn crate::codec::MessageCodec,
+        e2ee: &dyn crate::e2ee::E2eeHook,
+        frame: &[u8],
+    ) -> Result<MessageAcknowledgement, crate::chat::port::ChatError> {
+        let plain = e2ee
+            .open(session, frame)
+            .map_err(|error| crate::chat::port::ChatError::InvalidMessage(error.to_string()))?;
+        let message = codec
+            .decode(&plain)
+            .map_err(|error| crate::chat::port::ChatError::InvalidMessage(error.to_string()))?;
+        self.handle_authenticated_message(session, message).await
+    }
+}
 
 ////////
 
@@ -459,7 +488,7 @@ pub(crate) fn protocol_error_message(
 
 /// # [HANDLER] - acknowledgement_message
 /// * `DESC`: `閺嬪嫰鈧姵瀵旀稊鍛濞戝牊浼呴惃鍕箛閸旓紕顏涵顔款吇閸楀繗顔呯敮顪?
-fn acknowledgement_message(acknowledgement: &MessageAcknowledgement) -> MessageBody {
+pub(crate) fn acknowledgement_message(acknowledgement: &MessageAcknowledgement) -> MessageBody {
     let stage = match acknowledgement.stage {
         AckStage::ServerPersisted => crate::models::message::AckStage::ServerPersisted,
         AckStage::DeviceDelivered => crate::models::message::AckStage::DeviceDelivered,

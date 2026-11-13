@@ -293,6 +293,71 @@ impl DirectChatSessionRepository for PgDirectChatSessionRepository {
 
         Ok(peer_account_id)
     }
+
+    /// # [HANDLER] - increment_unread
+    /// * `DESC`: `收件方未读数原子 +delta（GREATEST 防负），返回最新未读数`
+    async fn increment_unread(
+        &self,
+        session_id: &str,
+        account_id: u64,
+        delta: i64,
+    ) -> Result<i64, String> {
+        let session_id = Uuid::parse_str(session_id)
+            .map_err(|_| "invalid session id".to_owned())?;
+        let account = i64::try_from(account_id)
+            .map_err(|_| "account id exceeds PostgreSQL bigint".to_owned())?;
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            UPDATE im_2024.chat_session_members
+            SET unread_count = GREATEST(unread_count + $3, 0),
+                updated_at = NOW()
+            WHERE session_id = $1
+              AND account_id = $2
+              AND member_state = 1
+            RETURNING unread_count
+            "#,
+        )
+        .bind(session_id)
+        .bind(account)
+        .bind(delta)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| {
+            log_sqlx_error("chat_session.increment_unread", &error);
+            error.to_string()
+        })?;
+
+        count.ok_or_else(|| "chat session member not found".to_owned())
+    }
+
+    /// # [HANDLER] - clear_unread
+    /// * `DESC`: `把该账号在该会话的未读清零（幂等），返回 0`
+    async fn clear_unread(&self, session_id: &str, account_id: u64) -> Result<i64, String> {
+        let session_id = Uuid::parse_str(session_id)
+            .map_err(|_| "invalid session id".to_owned())?;
+        let account = i64::try_from(account_id)
+            .map_err(|_| "account id exceeds PostgreSQL bigint".to_owned())?;
+        let count = sqlx::query_scalar::<_, i64>(
+            r#"
+            UPDATE im_2024.chat_session_members
+            SET unread_count = 0,
+                updated_at = NOW()
+            WHERE session_id = $1
+              AND account_id = $2
+            RETURNING unread_count
+            "#,
+        )
+        .bind(session_id)
+        .bind(account)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|error| {
+            log_sqlx_error("chat_session.clear_unread", &error);
+            error.to_string()
+        })?;
+
+        count.ok_or_else(|| "chat session member not found".to_owned())
+    }
 }
 
 #[derive(sqlx::FromRow)]

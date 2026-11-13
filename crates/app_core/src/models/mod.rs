@@ -1,5 +1,5 @@
-// crates/app_core/src/models/mod -- 板条箱 - 应用核心 - 模型 - mod
-// 2026-01-20 14:10
+// crates/app_core/src/models/mod -- CORE - 模型 - mod
+// 2026/1/20 14:10
 
 ////////
 

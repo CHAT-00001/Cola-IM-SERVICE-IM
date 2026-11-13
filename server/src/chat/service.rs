@@ -104,7 +104,7 @@ where
             session,
             message,
             ConversationKind::Direct,
-            chat.session_id,
+            chat.session_id.clone(),
             vec![recipient],
         );
         self.store.persist_message_and_mailboxes(&persisted).await?;
@@ -117,6 +117,19 @@ where
             )
             .await
             .map_err(|e| ChatError::Persistence(format!("session repository: {e}")))?;
+
+        // 收件方未读 +1：失败只告警，不回滚已落库的消息
+        if let Err(error) = self
+            .sessions
+            .increment_unread(&chat.session_id, recipient, 1)
+            .await
+        {
+            tracing::warn!(
+                session_id = %chat.session_id,
+                recipient,
+                "increment unread failed: {error}"
+            );
+        }
         for device in self.devices.online_device_ids(session.account_id).await {
             if device != session.device_id {
                 let _ = self
@@ -166,6 +179,19 @@ where
             .peer_account_id_in_session(session_id, account_id)
             .await
             .map_err(|error| ChatError::Persistence(format!("session repository: {error}")))
+    }
+
+    /// # [HANDLER] - is_session_member
+    /// * `DESC`: `确认账号是否属于有效单聊会话，用于历史读取授权`
+    pub async fn is_session_member(
+        &self,
+        session_id: &str,
+        account_id: u64,
+    ) -> Result<bool, ChatError> {
+        Ok(self
+            .resolve_session_peer(session_id, account_id)
+            .await?
+            .is_some())
     }
 
     /// # [HANDLER] - conversation_history
@@ -273,6 +299,18 @@ where
         }
         Ok(result)
     }
+
+    /// # [HANDLER] - is_member
+    /// * `DESC`: `确认账号是否为有效群成员，用于历史读取授权`
+    pub async fn is_member(&self, group: &str, account_id: u64) -> Result<bool, ChatError> {
+        if group.trim().is_empty() {
+            return Ok(false);
+        }
+        self.groups
+            .is_member(group, account_id)
+            .await
+            .map_err(|error| ChatError::Persistence(format!("group repository: {error}")))
+    }
 }
 
 ////////
@@ -319,6 +357,8 @@ fn message_summary(message: &MessageBody) -> String {
             .clone()
             .or_else(|| value.url.clone())
             .unwrap_or_else(|| "[media]".to_owned()),
+        // 通话记录：摘要只给占位，客户端按消息载荷渲染本地化文案
+        Payload::Call(value) => format!("[Call] {}", value.kind),
     }
 }
 
@@ -434,6 +474,8 @@ impl<S: MessageStore> AcknowledgementService<S> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
@@ -580,6 +622,19 @@ mod tests {
                 .find(|(id, member, _)| id == session_id && *member == account_id)
                 .map(|(_, _, peer)| *peer))
         }
+
+        async fn increment_unread(
+            &self,
+            _: &str,
+            _: u64,
+            delta: i64,
+        ) -> Result<i64, String> {
+            Ok(delta)
+        }
+
+        async fn clear_unread(&self, _: &str, _: u64) -> Result<i64, String> {
+            Ok(0)
+        }
     }
 
     /// # [HANDLER] - resolve_session_peer_returns_session_counterpart
@@ -624,9 +679,33 @@ mod tests {
             NoBlocklist,
         );
 
-        assert_eq!(service.resolve_session_peer("session-2", 10).await.unwrap(), None);
-        assert_eq!(service.resolve_session_peer("session-1", 30).await.unwrap(), None);
+        assert_eq!(
+            service.resolve_session_peer("session-2", 10).await.unwrap(),
+            None
+        );
+        assert_eq!(
+            service.resolve_session_peer("session-1", 30).await.unwrap(),
+            None
+        );
         assert_eq!(service.resolve_session_peer("", 10).await.unwrap(), None);
+    }
+
+    /// # [HANDLER] - is_session_member_rejects_unknown_session
+    /// * `DESC`: `验证历史读取授权不会把未知会话误判为当前账号可访问`
+    #[tokio::test]
+    async fn is_session_member_rejects_unknown_session() {
+        let service = DirectMessageService::new(
+            NoopStore,
+            AllowAllContacts,
+            NoopDevices,
+            FakeSessions::default(),
+            NoBlocklist,
+        );
+
+        assert!(!service
+            .is_session_member("unknown-session", 10)
+            .await
+            .unwrap());
     }
 }
 

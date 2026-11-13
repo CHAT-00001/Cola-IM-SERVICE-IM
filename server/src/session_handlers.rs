@@ -8,9 +8,12 @@ use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 
 use app_core::models::chat::ChatSessionListItem;
+use app_core::models::user::UserProfile;
+use app_core::ports::identity::UserIdentityRepository;
 use crate::chat::model::AuthenticatedSession;
 use crate::chat::port::ChatError;
 use crate::chat::session::DirectChatSessionService;
+use crate::service::identity::IdentitySource;
 
 ////////
 
@@ -103,6 +106,59 @@ pub async fn add_direct_chat_session(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ReadDirectChatSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ReadDirectChatSessionResponse {
+    session_id: String,
+    unread_count: i64,
+}
+
+////////
+
+/// # [HANDLER] - read_direct_chat_session
+/// * `DESC`: `把当前账号在该会话的未读清零（幂等）`
+pub async fn read_direct_chat_session(
+    request: HttpRequest,
+    service: web::Data<std::sync::Arc<SessionService>>,
+    body: web::Json<ReadDirectChatSessionRequest>,
+) -> HttpResponse {
+    let session = match authenticated_session(&request) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+
+    match service
+        .clear_unread(session.account_id, &body.session_id)
+        .await
+    {
+        Ok(unread_count) => HttpResponse::Ok().json(ReadDirectChatSessionResponse {
+            session_id: body.session_id.clone(),
+            unread_count,
+        }),
+        Err(ChatError::InvalidMessage(message)) => HttpResponse::BadRequest().json(ErrorResponse {
+            error: "invalid_request",
+            message,
+        }),
+        Err(ChatError::Unauthorized) => HttpResponse::Forbidden().json(ErrorResponse {
+            error: "forbidden",
+            message: "chat session is not accessible".to_owned(),
+        }),
+        Err(error) => {
+            tracing::warn!(error = %error, "clear unread failed");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "internal_error",
+                message: "could not clear unread".to_owned(),
+            })
+        }
+    }
+}
+
+////////
+
 pub(crate) fn authenticated_session(
     request: &HttpRequest,
 ) -> Result<AuthenticatedSession, HttpResponse> {
@@ -175,7 +231,65 @@ pub(crate) fn authenticated_session(
 
 #[derive(Debug, Serialize)]
 struct ChatSessionListResponse {
-    sessions: Vec<ChatSessionListItem>,
+    sessions: Vec<ChatSessionListItemVo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PeerProfileVo {
+    account_id: u64,
+    nickname: String,
+    avatar_url: Option<String>,
+    signature: Option<String>,
+    gender: Option<i16>,
+    status: Option<i16>,
+}
+
+impl From<UserProfile> for PeerProfileVo {
+    fn from(profile: UserProfile) -> Self {
+        Self {
+            account_id: profile.account_id,
+            nickname: profile.nickname,
+            avatar_url: profile.avatar_url,
+            signature: profile.signature,
+            gender: profile.gender,
+            status: profile.status,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ChatSessionListItemVo {
+    session_id: String,
+    channel: i16,
+    status: i16,
+    peer_account_id: i64,
+    peer_profile: Option<PeerProfileVo>,
+    is_pinned: bool,
+    last_message_id: Option<String>,
+    last_message_summary: Option<String>,
+    notification_settings: serde_json::Value,
+    member_state: i16,
+    unread_count: i64,
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl ChatSessionListItemVo {
+    fn from_session(session: ChatSessionListItem, peer_profile: Option<PeerProfileVo>) -> Self {
+        Self {
+            session_id: session.session_id,
+            channel: session.channel,
+            status: session.status,
+            peer_account_id: session.peer_account_id,
+            peer_profile,
+            is_pinned: session.is_pinned,
+            last_message_id: session.last_message_id,
+            last_message_summary: session.last_message_summary,
+            notification_settings: session.notification_settings,
+            member_state: session.member_state,
+            unread_count: session.unread_count,
+            updated_at: session.updated_at,
+        }
+    }
 }
 
 /// # [HANDLER] - list_direct_chat_sessions
@@ -183,6 +297,7 @@ struct ChatSessionListResponse {
 pub async fn list_direct_chat_sessions(
     request: HttpRequest,
     service: web::Data<std::sync::Arc<SessionService>>,
+    identity: web::Data<IdentitySource>,
 ) -> HttpResponse {
     let session = match authenticated_session(&request) {
         Ok(session) => session,
@@ -190,7 +305,38 @@ pub async fn list_direct_chat_sessions(
     };
 
     match service.list_sessions(session.account_id).await {
-        Ok(sessions) => HttpResponse::Ok().json(ChatSessionListResponse { sessions }),
+        Ok(sessions) => {
+            let mut profiles: std::collections::HashMap<i64, Option<PeerProfileVo>> =
+                std::collections::HashMap::new();
+            let mut response_sessions = Vec::with_capacity(sessions.len());
+            for item in sessions {
+                let peer_profile = if item.peer_account_id > 0 {
+                    if let Some(profile) = profiles.get(&item.peer_account_id) {
+                        profile.clone()
+                    } else {
+                        let profile = match identity.fetch_profile(item.peer_account_id as u64).await {
+                            Ok(profile) => profile.map(PeerProfileVo::from),
+                            Err(error) => {
+                                tracing::warn!(
+                                    peer_account_id = item.peer_account_id,
+                                    error = %error,
+                                    "Failed to fetch peer profile for chat session list"
+                                );
+                                None
+                            }
+                        };
+                        profiles.insert(item.peer_account_id, profile.clone());
+                        profile
+                    }
+                } else {
+                    None
+                };
+                response_sessions.push(ChatSessionListItemVo::from_session(item, peer_profile));
+            }
+            HttpResponse::Ok().json(ChatSessionListResponse {
+                sessions: response_sessions,
+            })
+        }
         Err(ChatError::InvalidMessage(message)) => HttpResponse::BadRequest().json(ErrorResponse {
             error: "invalid_request",
             message,

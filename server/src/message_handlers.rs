@@ -33,7 +33,7 @@ pub struct MessageSyncQuery {
     /// 会话 ID：存在时按时间线返回该会话历史，缺省时仍返回未确认的离线消息。
     #[serde(default)]
     pub room_id: Option<String>,
-    /// 历史翻页游标：上一页最早一条消息的 `send_at`（RFC3339）。
+    /// 历史翻页游标：上一页最早一条消息的服务端 `server_sync_at`（RFC3339）。
     #[serde(default)]
     pub before: Option<String>,
 }
@@ -103,12 +103,10 @@ pub async fn sync_offline_messages(
             .await
         {
             Ok(messages) => HttpResponse::Ok().json(MessageHistoryResponse { messages }),
-            Err(ChatError::Unauthorized) => {
-                HttpResponse::Forbidden().json(ErrorResponse {
-                    error: "forbidden",
-                    message: "conversation is not accessible".to_owned(),
-                })
-            }
+            Err(ChatError::Unauthorized) => HttpResponse::Forbidden().json(ErrorResponse {
+                error: "forbidden",
+                message: "conversation is not accessible".to_owned(),
+            }),
             Err(error) => error_response(error, "could not load conversation history"),
         };
     }
@@ -159,7 +157,10 @@ pub async fn send_message(
 
 /// # [HANDLER] - build_message
 /// * `DESC`: `将 REST 发送请求转换为内部消息体并补齐默认字段`
-fn build_message(session: &crate::chat::model::AuthenticatedSession, request: SendMessageRequest) -> MessageBody {
+fn build_message(
+    session: &crate::chat::model::AuthenticatedSession,
+    request: SendMessageRequest,
+) -> MessageBody {
     MessageBody {
         status: Status::Sending,
         client_id: request.client_id.unwrap_or_default(),

@@ -4,9 +4,12 @@
 ////////
 
 mod app;
+mod call;
+mod call_handlers;
 mod chat;
 mod codec;
 mod config;
+mod e2ee;
 mod entity;
 mod handlers;
 mod hub;
@@ -17,6 +20,7 @@ mod service;
 mod session_handlers;
 mod shared_handler;
 mod ticket_handlers;
+mod wt;
 
 ////////
 

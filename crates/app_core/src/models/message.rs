@@ -107,6 +107,27 @@ pub enum Payload {
 
     #[serde(rename = "Barrage")]
     Barrage(BarrageInfo), // 弹幕
+
+    #[serde(rename = "Call")]
+    Call(CallInfo), // 语音/视频通话记录
+}
+
+/// # [MODEL] - 通话记录负载
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CallInfo {
+    pub call_id: String,
+    pub kind: String,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdp: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<String>,
 }
 
 /// ## Media Info

@@ -6,7 +6,7 @@
 use actix_web::{web, App, HttpServer};
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 ////////
 
@@ -24,8 +24,7 @@ use crate::service::mongodb::{
 };
 use crate::service::relationships::{PgGroupGateway, PgRelationshipGateway};
 use crate::shared_handler::ChatHandler;
-use
-app_config::app_state::AppState as ConfigAppState;
+use app_config::app_state::AppState as ConfigAppState;
 use app_config::config::{Mongodb, Pg, Redis};
 use app_config::db::{mongodb_init, pg_init, redis_init, DbConnection};
 use storage_pg::repository::chat_session::PgDirectChatSessionRepository;
@@ -189,6 +188,7 @@ pub async fn run() -> std::io::Result<()> {
     ));
 
     let hub = ChatHub::new(settings.server.ws.outbound_queue_capacity);
+    let identity_source_for_sessions = identity_source.clone();
     let chat_session_repository = PgDirectChatSessionRepository::new(state.db.clone());
     let direct_service = DirectMessageService::new(
         message_store.clone(),
@@ -221,8 +221,14 @@ pub async fn run() -> std::io::Result<()> {
     info!("💡💡 - 应用状态和聊天服务初始化完成");
 
     let state_data = web::Data::new(state);
+    let hub_for_wt = hub.clone();
+    let handler_for_wt = Arc::clone(&handler);
     let hub_data = web::Data::new(hub);
     let handler_data = web::Data::new(handler);
+
+    // 通话信令注册表（单节点内存；多节点阶段换 Redis 路由）
+    let call_registry_data = web::Data::new(Arc::new(crate::call::CallRegistry::default()));
+    let identity_source_data = web::Data::new(identity_source_for_sessions);
     // 票据接口与 WS 同在主服务端口，因此消息大小上限统一取 chat_gateway 配置。
     let mut ws_settings = settings.server.ws.clone();
     ws_settings.max_message_bytes = settings.chat_gateway.max_message_bytes;
@@ -237,6 +243,7 @@ pub async fn run() -> std::io::Result<()> {
     let tickets = Arc::new(TicketStore::new(Duration::from_secs(
         settings.chat_gateway.ticket_ttl_seconds,
     )));
+    let tickets_for_wt = Arc::clone(&tickets);
     let tickets_data = web::Data::new(tickets);
 
     // 6. 启动服务器
@@ -257,15 +264,59 @@ pub async fn run() -> std::io::Result<()> {
 
     ////////
 
+    // WebTransport 与 WS 共享同一 hub / handler / tickets，仅 transport 不同。
+    if settings.server.wt.enabled {
+        if !settings.server.wt.allow_insecure_passthrough {
+            error!(
+                "WebTransport enabled but no real E2EE implementation is configured; set server.wt.allow_insecure_passthrough=true only for local development"
+            );
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "WebTransport requires real E2EE or explicit insecure passthrough opt-in",
+            ));
+        }
+        match crate::wt::build_endpoint(&settings.server.wt) {
+            Ok(endpoint) => {
+                info!("WebTransport listener bound at {}", endpoint.local_addr()?);
+                warn!(
+                    "WebTransport is using insecure PassthroughE2ee; this mode is for local development only"
+                );
+                let deps = Arc::new(crate::wt::WtDeps {
+                    tickets: tickets_for_wt.clone(),
+                    handler: handler_for_wt.clone(),
+                    hub: hub_for_wt.clone(),
+                    e2ee: Arc::new(crate::e2ee::PassthroughE2ee),
+                    max_frame_bytes: settings.chat_gateway.max_message_bytes,
+                });
+                tokio::spawn(async move {
+                    while let Some(incoming) = endpoint.accept().await {
+                        let deps = Arc::clone(&deps);
+                        tokio::spawn(async move {
+                            if let Err(error) = crate::wt::serve_connection(incoming, deps).await {
+                                warn!("WebTransport connection ended: {error}");
+                            }
+                        });
+                    }
+                });
+            }
+            Err(error) => {
+                error!("WebTransport 配置非法或启动失败: {error}");
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, error));
+            }
+        }
+    }
+
     let main_server = HttpServer::new(move || {
         App::new()
             .wrap(crate::middleware::RequestLogger)
             .app_data(state_data.clone())
             .app_data(hub_data.clone())
             .app_data(handler_data.clone())
+            .app_data(identity_source_data.clone())
             .app_data(ws_settings_data.clone())
             .app_data(chat_session_service_data.clone())
             .app_data(tickets_data.clone())
+            .app_data(call_registry_data.clone())
             .route("/ws", web::get().to(ws_index))
             .route(
                 "/ws/ticket",
@@ -280,6 +331,10 @@ pub async fn run() -> std::io::Result<()> {
                 web::get().to(crate::session_handlers::list_direct_chat_sessions),
             )
             .route(
+                "/chat/session/read",
+                web::post().to(crate::session_handlers::read_direct_chat_session),
+            )
+            .route(
                 "/message/sync",
                 web::get().to(crate::message_handlers::sync_offline_messages),
             )
@@ -287,6 +342,13 @@ pub async fn run() -> std::io::Result<()> {
                 "/message/send",
                 web::post().to(crate::message_handlers::send_message),
             )
+            .route("/call/invite", web::post().to(crate::call_handlers::invite))
+            .route("/call/incoming", web::get().to(crate::call_handlers::incoming))
+            .route("/call/answer", web::post().to(crate::call_handlers::answer))
+            .route("/call/ice", web::post().to(crate::call_handlers::ice))
+            .route("/call/reject", web::post().to(crate::call_handlers::reject))
+            .route("/call/cancel", web::post().to(crate::call_handlers::cancel))
+            .route("/call/hangup", web::post().to(crate::call_handlers::hangup))
     })
     .bind(&addr)?
     .run();

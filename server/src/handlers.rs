@@ -2,6 +2,7 @@
 // 2026-01-05 11:20:00
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use actix::{Actor, ActorContext, AsyncContext, StreamHandler};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
@@ -70,6 +71,12 @@ impl Actor for ChatSession {
         }
 
         ctx.add_stream(ReceiverStream::new(receiver));
+
+        // 心跳：服务端主动 Ping，浏览器自动回 Pong；避免 NAT/代理把空闲连接回收，
+        // 同时也能尽早发现半开连接。25s 小于常见 60s 空闲超时。
+        ctx.run_interval(Duration::from_secs(25), |_, ctx| {
+            ctx.ping(b"");
+        });
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
@@ -84,8 +91,12 @@ impl Actor for ChatSession {
 
 impl StreamHandler<MessageBody> for ChatSession {
     fn handle(&mut self, message: MessageBody, ctx: &mut Self::Context) {
+        // WS 固定使用 JSON 文本帧，编码结果必然是合法 UTF-8。
         match JsonCodec.encode(&message) {
-            Ok(encoded) => ctx.text(encoded),
+            Ok(encoded) => match String::from_utf8(encoded) {
+                Ok(text) => ctx.text(text),
+                Err(error) => warn!("Outbound WebSocket JSON is not UTF-8: {error}"),
+            },
             Err(error) => warn!("Failed to encode outbound WebSocket message: {error}"),
         }
     }
@@ -112,7 +123,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for ChatSession {
                     return;
                 }
 
-                match JsonCodec.decode(&text) {
+                match JsonCodec.decode(text.as_bytes()) {
                     Ok(message) => match message.channel.unwrap_or(MsgChannel::public) {
                         MsgChannel::single | MsgChannel::group | MsgChannel::received => {
                             let Some((account_id, device_id)) = &self.authenticated_identity else {

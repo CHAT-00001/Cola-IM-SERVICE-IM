@@ -59,7 +59,9 @@ impl ChatGatewaySettings {
             return Err("chat_gateway.ticket_ttl_seconds must be between 5 and 300".to_owned());
         }
         if !(1024..=1024 * 1024).contains(&self.max_message_bytes) {
-            return Err("chat_gateway.max_message_bytes must be between 1024 and 1048576".to_owned());
+            return Err(
+                "chat_gateway.max_message_bytes must be between 1024 and 1048576".to_owned(),
+            );
         }
         Ok(())
     }
@@ -273,6 +275,9 @@ pub struct WtSettings {
     pub cert_file: Option<String>,
     #[serde(default)]
     pub key_file: Option<String>,
+    /// 仅供本地开发临时允许 PassthroughE2ee；生产默认拒绝。
+    #[serde(default)]
+    pub allow_insecure_passthrough: bool,
 }
 
 ////////
@@ -286,6 +291,7 @@ impl Default for WtSettings {
             enabled: false,
             cert_file: None,
             key_file: None,
+            allow_insecure_passthrough: false,
         }
     }
 }
@@ -557,6 +563,7 @@ mod tests {
 
         assert_eq!(settings.server.ws_port(), 19967);
         assert_eq!(settings.server.wt.port, 20048);
+        assert!(!settings.server.wt.allow_insecure_passthrough);
         assert_eq!(settings.pg.max_connections, 50);
         assert_eq!(settings.mongodb.dbname, "cola_im_2024");
         assert_eq!(settings.mongodb.transactions, "auto");
@@ -619,32 +626,26 @@ mod tests {
         .validate()
         .is_err());
 
-        assert!(
-            IdentitySettings {
-                transport: "thrift".to_owned(),
-                ..IdentitySettings::default()
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(IdentitySettings {
+            transport: "thrift".to_owned(),
+            ..IdentitySettings::default()
+        }
+        .validate()
+        .is_err());
 
-        assert!(
-            IdentitySettings {
-                timeout_ms: 5,
-                ..IdentitySettings::default()
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(IdentitySettings {
+            timeout_ms: 5,
+            ..IdentitySettings::default()
+        }
+        .validate()
+        .is_err());
 
-        assert!(
-            IdentitySettings {
-                base_url: "127.0.0.1:8080".to_owned(),
-                ..IdentitySettings::default()
-            }
-            .validate()
-            .is_err()
-        );
+        assert!(IdentitySettings {
+            base_url: "127.0.0.1:8080".to_owned(),
+            ..IdentitySettings::default()
+        }
+        .validate()
+        .is_err());
     }
 
     /// # [HANDLER] - chat_gateway_rejects_out_of_range_values

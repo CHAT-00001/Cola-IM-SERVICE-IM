@@ -80,6 +80,17 @@ pub trait DirectChatSessionRepository: Send + Sync {
         session_id: &str,
         account_id: u64,
     ) -> Result<Option<u64>, String>;
+
+    /// 行为 5：收件方未读数 +1（发送成功后调用，失败不回滚消息）
+    async fn increment_unread(
+        &self,
+        session_id: &str,
+        account_id: u64,
+        delta: i64,
+    ) -> Result<i64, String>;
+
+    /// 行为 6：把该账号在该会话的未读清零（客户端打开会话/已读时调用）
+    async fn clear_unread(&self, session_id: &str, account_id: u64) -> Result<i64, String>;
 }
 
 #[async_trait]

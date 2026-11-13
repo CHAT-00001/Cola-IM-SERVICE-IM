@@ -1,9 +1,13 @@
 // crates/app_core/src/usecase/message.rs
 // 2026-03-24 14:02
 
+////////
+
 use crate::models::message::{Message, Payload};
 use crate::ports::message::MessageRepository;
 use chrono::Utc;
+
+////////
 
 pub struct MessageUseCase<R: MessageRepository> {
     repo: R,
@@ -41,6 +45,14 @@ impl<R: MessageRepository> MessageUseCase<R> {
             Payload::Media(m) => {
                 if m.url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
                     return Err("媒体 URL 为空".to_string());
+                }
+            }
+            Payload::Call(c) => {
+                if c.call_id.trim().is_empty() {
+                    return Err("通话记录缺少 call_id".to_string());
+                }
+                if c.kind.trim().is_empty() || c.state.trim().is_empty() {
+                    return Err("通话记录缺少 kind/state".to_string());
                 }
             }
         }

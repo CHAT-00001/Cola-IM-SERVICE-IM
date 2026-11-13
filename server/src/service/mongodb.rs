@@ -189,7 +189,6 @@ impl MessageStore for MessageStoreBackend {
     }
 }
 
-
 impl UnavailableMessageStore {
     ////////
 
@@ -206,7 +205,10 @@ impl UnavailableMessageStore {
     /// # [HANDLER] - error
     /// * `DESC`: `构造携带降级原因的持久化错误`
     fn error(&self) -> ChatError {
-        ChatError::Persistence(format!("[🤐 MG REPO] - ❌️ MongoDB unavailable: {}", self.reason))
+        ChatError::Persistence(format!(
+            "[🤐 MG REPO] - ❌️ MongoDB unavailable: {}",
+            self.reason
+        ))
     }
 }
 
@@ -712,18 +714,15 @@ impl MessageStore for MongoMessageStore {
             return Err(error);
         }
 
-        session
-            .commit_transaction()
-            .await
-            .map_err(|error| {
-                tracing::error!(
-                    target: "server::mongo_store",
-                    message_id = %message.message_id,
-                    error = %error,
-                    "[🍃 MG STORE] 事务提交失败；消息未落库"
-                );
-                persistence_error(error)
-            })?;
+        session.commit_transaction().await.map_err(|error| {
+            tracing::error!(
+                target: "server::mongo_store",
+                message_id = %message.message_id,
+                error = %error,
+                "[🍃 MG STORE] 事务提交失败；消息未落库"
+            );
+            persistence_error(error)
+        })?;
 
         tracing::info!(
             target: "server::mongo_store",
@@ -960,7 +959,7 @@ impl MessageStore for MongoMessageStore {
 
     /// # [HANDLER] - conversation_history
     /// * `DESC`: `按 conversation_id 从主消息集合倒序读取最近 limit 条，再反转成时间正序返回`
-    /// * `NOTE`: `before 为上一页最早一条的 send_at，用于向上翻页；索引 (conversation_id, created_at, message_id) 已建`
+    /// * `NOTE`: `before 为上一页最早一条的服务端 server_sync_at，用于向上翻页；它与 created_at 使用同一服务端落库时间基准；索引已建`
     async fn conversation_history(
         &self,
         conversation_id: &str,

@@ -84,6 +84,25 @@ where
             .await
             .map_err(|error| ChatError::Persistence(format!("chat session repository: {error}")))
     }
+
+    /// # [HANDLER] - clear_unread
+    /// * `DESC`: `把该账号在该会话的未读清零（客户端打开/已读会话时调用）`
+    pub async fn clear_unread(
+        &self,
+        account_id: u64,
+        session_id: &str,
+    ) -> Result<i64, ChatError> {
+        let session_id = session_id.trim();
+        if account_id == 0 || session_id.is_empty() {
+            return Err(ChatError::InvalidMessage(
+                "account id and session id are required".to_owned(),
+            ));
+        }
+        self.repository
+            .clear_unread(session_id, account_id)
+            .await
+            .map_err(|error| ChatError::Persistence(format!("chat session repository: {error}")))
+    }
 }
 
 #[cfg(test)]
@@ -144,6 +163,19 @@ mod tests {
             _account_id: u64,
         ) -> Result<Option<u64>, String> {
             Ok(None)
+        }
+
+        async fn increment_unread(
+            &self,
+            _session_id: &str,
+            _account_id: u64,
+            delta: i64,
+        ) -> Result<i64, String> {
+            Ok(delta)
+        }
+
+        async fn clear_unread(&self, _session_id: &str, _account_id: u64) -> Result<i64, String> {
+            Ok(0)
         }
     }
 

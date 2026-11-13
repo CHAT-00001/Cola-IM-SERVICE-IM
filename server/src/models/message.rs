@@ -93,6 +93,16 @@ pub enum Event {
     DeviceDeliveredAck = 12, // 设备在线确认
     DeviceReadAck = 13,      // 设备同步确认
     AckRecorded = 14,        // 已读确认
+
+    // ——— 通话信令（端到端 WebRTC，服务端只转发 SDP/ICE）———
+    CallInvite = 15,  // 发起呼叫
+    CallAnswer = 16,  // 接听（携带 answer SDP / SFU ticket）
+    CallReject = 17,  // 拒接
+    CallCancel = 18,  // 主叫取消
+    CallIce = 19,     // ICE 候选（trickle）
+    CallHangup = 20,  // 通话中挂断
+    CallTimeout = 21, // 服务端判定超时未接听
+    CallState = 22,   // 服务端广播状态变更（ringing/connected/ended）
 }
 
 ////////
@@ -125,6 +135,30 @@ pub enum Payload {
 
     #[serde(rename = "Barrage")]
     Barrage(BarrageInfo), // 弹幕
+
+    #[serde(rename = "Call")]
+    Call(CallInfo), // 语音/视频通话记录
+}
+
+////////
+
+/// # [MODEL] - 通话记录负载
+/// * `DESC`: `随通话消息落库，进度（calling/connected/ended）与结果都在这里，前端据此渲染气泡`
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct CallInfo {
+    pub call_id: String,  // 通话 ID（服务端生成）
+    pub kind: String,     // voice | video
+    pub state: String,    // calling | connected | ended
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>, // missed | rejected | cancelled | hangup | failed
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>, // 接通后的时长
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_mode: Option<String>, // p2p | sfu（预留中央推流）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdp: Option<String>, // 信令用：offer/answer，不落库
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate: Option<String>, // 信令用：ICE candidate，不落库
 }
 
 ////////

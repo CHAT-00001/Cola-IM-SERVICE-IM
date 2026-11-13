@@ -101,14 +101,11 @@ impl HttpUserIdentity {
         body: &str,
         requested_account_id: u64,
     ) -> Result<Option<UserProfile>, String> {
-        let envelope: ProfileEnvelope = serde_json::from_str(body)
-            .map_err(|error| format!("用户资料响应不是合法 JSON: {error}; body={body}"))?;
+        let envelope: ProfileEnvelope =
+            serde_json::from_str(body).map_err(|_| "用户资料响应不是合法 JSON".to_owned())?;
 
         if envelope.code != 0 {
-            return Err(format!(
-                "用户资料接口返回业务错误: code={} message={}",
-                envelope.code, envelope.message
-            ));
+            return Err(format!("用户资料接口返回业务错误: code={}", envelope.code));
         }
 
         let Some(payload) = envelope.data else {
@@ -143,13 +140,13 @@ impl UserIdentityRepository for HttpUserIdentity {
             .timeout(self.timeout)
             .send()
             .await
-            .map_err(|error| format!("请求用户资料接口失败: {error}; url={url}"))?;
+            .map_err(|_| "请求用户资料接口失败".to_owned())?;
 
         let status = response.status();
         let body = response
             .text()
             .await
-            .map_err(|error| format!("读取用户资料响应失败: {error}; url={url}"))?;
+            .map_err(|_| "读取用户资料响应失败".to_owned())?;
 
         if !status.is_success() {
             warn!(
@@ -158,10 +155,7 @@ impl UserIdentityRepository for HttpUserIdentity {
                 status = status.as_u16(),
                 "[📡 IDENTITY HTTP] 用户资料接口返回非 2xx"
             );
-            return Err(format!(
-                "用户资料接口返回 HTTP {}; url={url}; body={body}",
-                status.as_u16()
-            ));
+            return Err(format!("用户资料接口返回 HTTP {}", status.as_u16(),));
         }
 
         let profile = Self::parse_profile(&body, account_id)?;
@@ -238,6 +232,17 @@ mod tests {
         let error = HttpUserIdentity::parse_profile(body, 1000020102)
             .expect_err("business error must surface as Err");
         assert!(error.contains("4003"), "unexpected error: {error}");
+    }
+
+    /// # [HANDLER] - parse_profile_does_not_expose_response_body
+    /// * `DESC`: `验证非法响应中的原文不会进入错误信息`
+    #[test]
+    fn parse_profile_does_not_expose_response_body() {
+        let body = "invalid-json-with-secret-token";
+        let error = HttpUserIdentity::parse_profile(body, 1000020102)
+            .expect_err("invalid response must fail");
+        assert!(!error.contains("secret-token"));
+        assert!(!error.contains(body));
     }
 
     /// # [HANDLER] - configured_token_is_appended
